@@ -22,9 +22,9 @@ st.markdown("---")
 # Upload files
 col1, col2 = st.columns(2)
 with col1:
-    planned_file = st.file_uploader("📋 Upload Planned Shifts", type=['xlsx', 'xls'])
+    planned_file = st.file_uploader(" Upload Planned Shifts", type=['xlsx', 'xls'])
 with col2:
-    actual_file = st.file_uploader("✅ Upload Actual Shifts", type=['xlsx', 'xls'])
+    actual_file = st.file_uploader(" Upload Actual Shifts", type=['xlsx', 'xls'])
 
 if planned_file and actual_file:
     planned_df = load_and_transform_excel(planned_file)
