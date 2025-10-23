@@ -1,64 +1,57 @@
 import streamlit as st
-from deviation_logic import load_and_transform_excel, calculate_deviations
-from plotting import (
-    analyze_deviation_types, analyze_deviation_trends,
-    analyze_monthly_deviation, analyze_employee_performance,
-    analyze_deviation_by_shift_type, analyze_shift_type_distribution
-)
+import pandas as pd
+from utils.excel_utils import initialize_excel, append_record, load_data
+from io import BytesIO 
+import os
 
-# Page config
-st.set_page_config(page_title="Attendance Deviation", layout="wide")
+st.set_page_config(page_title="Nurse Attendance Tracker", layout="wide")
+st.title("👩‍⚕️ Nurse Attendance & Deviation Tracker")
 
-# Load CSS
-def local_css(file_name):
-    with open(file_name) as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-local_css("style.css")
+# Initialize Excel file
+initialize_excel()
 
-# Title
-st.title("🏥 Cipla Palliative Care - Nurse Attendance Deviation Analysis")
-st.markdown("---")
+st.sidebar.header("Add Attendance Record")
+nurse_name = st.sidebar.text_input("Nurse Name")
+date = st.sidebar.date_input("Date")
+status = st.sidebar.selectbox("Status", ["A", "M", "N", "WO", "NO", "FL", "NH", "L"])
+ward = st.sidebar.text_input("Ward (if present)")
 
-# Upload files
-col1, col2 = st.columns(2)
-with col1:
-    planned_file = st.file_uploader(" Upload Planned Shifts", type=['xlsx', 'xls'])
-with col2:
-    actual_file = st.file_uploader(" Upload Actual Shifts", type=['xlsx', 'xls'])
+if st.sidebar.button("Save Record"):
+    if nurse_name:
+        append_record(nurse_name, date, status, ward)
+        st.sidebar.success(f"Record added for {nurse_name} on {date}")
+    else:
+        st.sidebar.error("Please enter Nurse Name before saving.")
 
-if planned_file and actual_file:
-    planned_df = load_and_transform_excel(planned_file)
-    actual_df = load_and_transform_excel(actual_file)
-    
-    if planned_df is not None and actual_df is not None:
-        st.success("Files loaded successfully!")
-        deviation_df = calculate_deviations(planned_df, actual_df)
-        
-        analysis_type = st.selectbox(
-            "Select Analysis Type",
-            [
-                "Deviation Types Distribution",
-                "Deviation Trends Over Time",
-                "Date-wise Deviation Analysis",
-                "Employee Performance Analysis",
-                "Deviation by Shift Type",
-                "Shift Type Distribution"
-            ]
+# Load data and display
+st.subheader("📋 Attendance Data")
+data = load_data()
+st.dataframe(data, use_container_width=True)
+
+# Optional: Deviation calculation
+st.subheader("📊 Deviation Summary")
+if not data.empty:
+    deviation_df = data.copy()
+    deviation_df['Absent'] = deviation_df['Status'].isin(['WO', 'NO', 'L', 'FL', 'NH'])
+    summary = (
+        deviation_df.groupby('Nurse Name')
+        .agg(Total_Days=('Date', 'count'),
+             Absent_Days=('Absent', 'sum'))
+        .reset_index()
+    )
+    summary['Deviation %'] = (summary['Absent_Days'] / summary['Total_Days']) * 100
+    st.dataframe(summary)
+
+st.subheader("⬇️ Download Attendance File")
+
+excel_path = os.path.join("data", "attendance_data.xlsx")
+if os.path.exists(excel_path):
+    with open(excel_path, "rb") as f:
+        st.download_button(
+            label="Download Attendance Excel",
+            data=f,
+            file_name="attendance_data.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-        
-        if analysis_type == "Deviation Types Distribution":
-            st.plotly_chart(analyze_deviation_types(deviation_df), use_container_width=True)
-        elif analysis_type == "Deviation Trends Over Time":
-            fig = analyze_deviation_trends(deviation_df)
-            if fig: st.plotly_chart(fig, use_container_width=True)
-        elif analysis_type == "Date-wise Deviation Analysis":
-            st.plotly_chart(analyze_monthly_deviation(deviation_df), use_container_width=True)
-        elif analysis_type == "Employee Performance Analysis":
-            fig, stats_df = analyze_employee_performance(deviation_df)
-            st.plotly_chart(fig, use_container_width=True)
-            st.dataframe(stats_df)
-        elif analysis_type == "Deviation by Shift Type":
-            fig = analyze_deviation_by_shift_type(deviation_df)
-            if fig: st.plotly_chart(fig, use_container_width=True)
-        elif analysis_type == "Shift Type Distribution":
-            st.plotly_chart(analyze_shift_type_distribution(deviation_df), use_container_width=True)
+else:
+    st.warning("No attendance file found yet. Add some records first.")
