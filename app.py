@@ -1,57 +1,65 @@
 import streamlit as st
 import pandas as pd
-from utils.excel_utils import initialize_excel, append_record, load_data
-from io import BytesIO 
+from utils.excel_processor import load_excel, calculate_all_deviations, save_excel
+from utils.data_models import NurseData
 import os
 
-st.set_page_config(page_title="Nurse Attendance Tracker", layout="wide")
-st.title("👩‍⚕️ Nurse Attendance & Deviation Tracker")
+st.title("Nurse Deviation Tracker - Palliative Center")
 
-# Initialize Excel file
-initialize_excel()
+DATA_FILE = os.path.join("data", "nurse_data.xlsx")
+os.makedirs("data", exist_ok=True)
 
-st.sidebar.header("Add Attendance Record")
-nurse_name = st.sidebar.text_input("Nurse Name")
-date = st.sidebar.date_input("Date")
-status = st.sidebar.selectbox("Status", ["A", "M", "N", "WO", "NO", "FL", "NH", "L"])
-ward = st.sidebar.text_input("Ward (if present)")
+nurses = {}
 
-if st.sidebar.button("Save Record"):
-    if nurse_name:
-        append_record(nurse_name, date, status, ward)
-        st.sidebar.success(f"Record added for {nurse_name} on {date}")
-    else:
-        st.sidebar.error("Please enter Nurse Name before saving.")
+# --- STEP 1: Load existing Excel if available ---
+if os.path.exists(DATA_FILE):
+    nurses = load_excel(DATA_FILE)
+    st.info(f"Loaded existing data from {DATA_FILE}")
 
-# Load data and display
-st.subheader("📋 Attendance Data")
-data = load_data()
-st.dataframe(data, use_container_width=True)
+# --- STEP 2: Optional upload to replace data ---
+uploaded_file = st.file_uploader("Upload Excel file (optional)", type=["xlsx"])
+if uploaded_file:
+    with open(DATA_FILE, "wb") as f:
+        f.write(uploaded_file.getvalue())
+    nurses = load_excel(DATA_FILE)
+    st.success("File uploaded and replaced successfully!")
 
-# Optional: Deviation calculation
-st.subheader("📊 Deviation Summary")
-if not data.empty:
-    deviation_df = data.copy()
-    deviation_df['Absent'] = deviation_df['Status'].isin(['WO', 'NO', 'L', 'FL', 'NH'])
-    summary = (
-        deviation_df.groupby('Nurse Name')
-        .agg(Total_Days=('Date', 'count'),
-             Absent_Days=('Absent', 'sum'))
-        .reset_index()
-    )
-    summary['Deviation %'] = (summary['Absent_Days'] / summary['Total_Days']) * 100
-    st.dataframe(summary)
+# --- STEP 3: Manual data entry ---
+st.header("Add / Update Nurse Data Manually")
 
-st.subheader("⬇️ Download Attendance File")
+nurse_name = st.text_input("Nurse Name")
+date = st.date_input("Date")
+is_present = st.radio("Status", ["Present", "Absent"])
 
-excel_path = os.path.join("data", "attendance_data.xlsx")
-if os.path.exists(excel_path):
-    with open(excel_path, "rb") as f:
-        st.download_button(
-            label="Download Attendance Excel",
-            data=f,
-            file_name="attendance_data.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+if is_present == "Present":
+    ward = st.text_input("Ward")
+    actual = st.selectbox("Shift", ["M", "A", "N"])
 else:
-    st.warning("No attendance file found yet. Add some records first.")
+    actual = st.selectbox("Leave Type", ["NO", "WO", "PH", "NH", "L", "Other"])
+    ward = None
+
+if st.button("Add Record"):
+    if nurse_name and date:
+        if nurse_name not in nurses:
+            nurses[nurse_name] = NurseData(nurse_name)
+        nurses[nurse_name].add_record(
+            date=str(date),
+            planned="",  # planned left blank for manual entries
+            actual=actual,
+            ward=ward
+        )
+
+        df = calculate_all_deviations(nurses)
+        save_excel(df, DATA_FILE)
+        st.success(f"Record added successfully and saved to {DATA_FILE}!")
+    else:
+        st.error("Please fill in Nurse Name and Date.")
+
+# --- STEP 4: Generate or Update Report ---
+if nurses and st.button("Generate / Update Deviation Report"):
+    df = calculate_all_deviations(nurses)
+    save_excel(df, DATA_FILE)
+    st.success(f"Deviation report updated successfully")
+
+    with open(DATA_FILE, "rb") as f:
+        st.download_button("Download Updated Report", f, file_name="nurse_deviation_report.xlsx")
